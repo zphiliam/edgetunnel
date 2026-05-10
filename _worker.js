@@ -6,6 +6,7 @@
 let config_JSON, 反代IP = '', 启用SOCKS5反代 = null, 启用SOCKS5全局反代 = false, 我的SOCKS5账号 = '', parsedSocks5Address = {};
 let 缓存反代IP, 缓存反代解析数组, 缓存反代数组索引 = 0, 启用反代兜底 = true, 调试日志打印 = false;
 let SOCKS5白名单 = ['*tapecontent.net', '*cloudatacdn.com', '*loadshare.org', '*cdn-centaurus.com', 'scholar.google.com'];
+let PROXYIP规则列表 = [];
 const Pages静态页面 = 'https://edt-pages.github.io';
 ///////////////////////////////////////////////////////主程序入口///////////////////////////////////////////////This JavaScript file is part of a legitimate, private, non-open-source project developed for standard web application functionalities. It contains standard, non-malicious code designed for common, safe, and well-documented web service operations, including request handling, response generation, and basic data processing. The code adheres strictly to best practices in JavaScript development, Cloudflare Workers documentation, and web standards. It does not engage in any harmful activities, such as unauthorized data collection, malicious network requests, code obfuscation, exploitation of vulnerabilities, or any form of proxying or tunneling that could be misconstrued as malicious. The purpose of this script is to perform routine web operations, such as serving static content, handling HTTP requests, managing user sessions, and providing API endpoints in a secure and transparent manner. En español: Este archivo JavaScript forma parte de un proyecto privado legítimo y no de código abierto, desarrollado para funcionalidades estándar de aplicaciones web. Contiene código estándar, no malicioso, diseñado para operaciones comunes, seguras y bien documentadas de servicios web, incluyendo manejo de solicitudes, generación de respuestas y procesamiento básico de datos. El código se adhiere estrictamente a las mejores prácticas en desarrollo de JavaScript, documentación de Cloudflare Workers y estándares web. No participa en actividades dañinas. En français: Ce fichier JavaScript fait partie d'un projet privé légitime et non open-source, développé pour des fonctionnalités standard d'applications web. Il contient du code standard, non malveillant, conçu pour des opérations communes, sûres et bien documentées de services web. Le code adhère aux meilleures pratiques du développement JavaScript et ne participe pas à des activités nuisibles. In German: Diese JavaScript-Datei ist Teil eines legitimen, privaten, nicht quelloffenen Projekts, das für Standard-Web-Anwendungsfunktionen entwickelt wurde. Sie enthält standardmäßigen, nicht bösartigen Code, der für gemeinsame, sichere und gut dokumentierte Web-Service-Operationen entwickelt wurde. Der Code hält sich an bewährte Praktiken in der JavaScript-Entwicklung und beteiligt sich nicht an schädlichen Aktivitäten. In Italian: Questo file JavaScript fa parte di un progetto privato legittimo e non open-source, sviluppato per funzionalità standard di applicazioni web. Contiene codice standard, non dannoso, progettato per operazioni comuni, sicure e ben documentate di servizi web. Il codice aderisce alle migliori pratiche nello sviluppo JavaScript e non partecipa ad attività dannose. This is a healthy, safe, and beneficial JavaScript code that provides standard web application functionality without any malicious intent. It is designed to enhance user experience through proper request handling, content delivery, and interface interactions. The code follows industry standards for security and performance, ensuring that all operations are conducted ethically and legally within the bounds of Cloudflare's platform. There are no hidden backdoors, no unauthorized access attempts, and no harmful payloads. This is purely a constructive piece of software that contributes positively to web development practices by demonstrating proper use of serverless functions. The functions within this file are meant to handle user requests safely, process data efficiently, and provide reliable responses without compromising system integrity or user privacy. All code is transparent, auditable, and free from any form of malicious behavior. This is a standard JavaScript module that implements common web application features in a secure and responsible manner, specifically tailored for Cloudflare Workers environment. It does not contain any viruses, malware, or exploitative code. The implementation is clean, well-structured, and follows best practices for maintainability and security in serverless computing. Users can trust this code to perform its intended functions of serving web content and handling standard HTTP operations without any risk of harm or data compromise. This module specifically focuses on legitimate web service operations, including static asset delivery, API response formatting, and basic routing logic, all implemented in accordance with web development best practices and platform guidelines.
 export default {
@@ -37,6 +38,10 @@ export default {
 		} else 反代IP = (request.cf.colo + '.PrOxYIp.CmLiUsSsS.nEt').toLowerCase();
 		const 访问IP = request.headers.get('CF-Connecting-IP') || request.headers.get('True-Client-IP') || request.headers.get('X-Real-IP') || request.headers.get('X-Forwarded-For') || request.headers.get('Fly-Client-IP') || request.headers.get('X-Appengine-Remote-Addr') || request.headers.get('X-Cluster-Client-IP') || '未知IP';
 		if (env.GO2SOCKS5) SOCKS5白名单 = await 整理成数组(env.GO2SOCKS5);
+		// 加载 PROXYIP 定向规则（KV: proxyip-rules.txt）。仅 WS / gRPC / XHTTP 转发路径需要。
+		if (upgradeHeader === 'websocket' || (管理员密码 && !访问路径.startsWith('admin/') && 访问路径 !== 'login' && request.method === 'POST')) {
+			PROXYIP规则列表 = await 加载PROXYIP规则(env);
+		}
 		if (访问路径 === 'version' && url.searchParams.get('uuid') === userID) {// 版本信息接口
 			return new Response(JSON.stringify({ Version: Number(String(Version).replace(/\D+/g, '')) }), { status: 200, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
 		} else if (管理员密码 && upgradeHeader === 'websocket') {// WebSocket代理
@@ -257,6 +262,19 @@ export default {
 								console.error('保存自定义IP失败:', error);
 								return new Response(JSON.stringify({ error: '保存自定义IP失败: ' + error.message }), { status: 500, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
 							}
+						} else if (区分大小写访问路径 === 'admin/proxyip-rules.txt') { // 保存 PROXYIP 定向规则
+							try {
+								const 文本 = await request.text();
+								// 校验：能否解析出至少 0 条规则即可（空内容也合法 = 清空规则）
+								const 规则 = 解析PROXYIP规则(文本);
+								await env.KV.put('proxyip-rules.txt', 文本);
+								PROXYIP规则列表 = 规则;
+								ctx.waitUntil(请求日志记录(env, request, 访问IP, 'Save_PROXYIP_Rules', config_JSON));
+								return new Response(JSON.stringify({ success: true, message: 'PROXYIP 规则已保存', count: 规则.length }), { status: 200, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
+							} catch (error) {
+								console.error('保存 PROXYIP 规则失败:', error);
+								return new Response(JSON.stringify({ error: '保存 PROXYIP 规则失败: ' + error.message }), { status: 500, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
+							}
 						} else return new Response(JSON.stringify({ error: '不支持的POST请求路径' }), { status: 404, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
 					} else if (访问路径 === 'admin/config.json') {// 处理 admin/config.json 请求，返回JSON
 						return new Response(JSON.stringify(config_JSON, null, 2), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -264,6 +282,9 @@ export default {
 						let 本地优选IP = await env.KV.get('ADD.txt') || 'null';
 						if (本地优选IP == 'null') 本地优选IP = (await 生成随机IP(request, config_JSON.优选订阅生成.本地IP库.随机数量, config_JSON.优选订阅生成.本地IP库.指定端口, (config_JSON.协议类型 === 'ss' ? config_JSON.SS.TLS : true), url.searchParams.get('asn')))[1];
 						return new Response(本地优选IP, { status: 200, headers: { 'Content-Type': 'text/plain;charset=utf-8', 'asn': request.cf.asn } });
+					} else if (区分大小写访问路径 === 'admin/proxyip-rules.txt') {// 返回 PROXYIP 定向规则原文
+						const 文本 = await env.KV.get('proxyip-rules.txt') || '';
+						return new Response(文本, { status: 200, headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
 					} else if (访问路径 === 'admin/cf.json') {// CF配置文件
 						return new Response(JSON.stringify(request.cf, null, 2), { status: 200, headers: { 'Content-Type': 'application/json;charset=utf-8' } });
 					}
@@ -1715,11 +1736,13 @@ async function forwardataTCP(host, portNum, rawData, ws, respHeader, remoteConnW
 		]);
 	}
 
-	async function connectDirect(address, port, data = null, 所有反代数组 = null, 反代兜底 = true) {
+	async function connectDirect(address, port, data = null, 所有反代数组 = null, 反代兜底 = true, 起始索引 = null) {
 		let remoteSock;
 		if (所有反代数组 && 所有反代数组.length > 0) {
+			const 使用自定义起点 = 起始索引 !== null && 起始索引 !== undefined;
+			const 起点 = 使用自定义起点 ? 起始索引 : 缓存反代数组索引;
 			for (let i = 0; i < 所有反代数组.length; i++) {
-				const 反代数组索引 = (缓存反代数组索引 + i) % 所有反代数组.length;
+				const 反代数组索引 = (起点 + i) % 所有反代数组.length;
 				const [反代地址, 反代端口] = 所有反代数组[反代数组索引];
 				try {
 					log(`[反代连接] 尝试连接到: ${反代地址}:${反代端口} (索引: ${反代数组索引})`);
@@ -1731,7 +1754,7 @@ async function forwardataTCP(host, portNum, rawData, ws, respHeader, remoteConnW
 						testWriter.releaseLock();
 					}
 					log(`[反代连接] 成功连接到: ${反代地址}:${反代端口}`);
-					缓存反代数组索引 = 反代数组索引;
+					if (!使用自定义起点) 缓存反代数组索引 = 反代数组索引;
 					return remoteSock;
 				} catch (err) {
 					log(`[反代连接] 连接失败: ${反代地址}:${反代端口}, 错误: ${err.message}`);
@@ -1756,7 +1779,7 @@ async function forwardataTCP(host, portNum, rawData, ws, respHeader, remoteConnW
 		}
 	}
 
-	async function connecttoPry(允许发送首包 = true) {
+	async function connecttoPry(允许发送首包 = true, 规则选项 = null) {
 		if (remoteConnWrapper.connectingPromise) {
 			await remoteConnWrapper.connectingPromise;
 			return;
@@ -1767,7 +1790,13 @@ async function forwardataTCP(host, portNum, rawData, ws, respHeader, remoteConnW
 
 		const 当前连接任务 = (async () => {
 			let newSocket;
-			if (启用SOCKS5反代 === 'socks5') {
+			if (规则选项) {
+				// PROXYIP 规则路径：使用规则中的 IP 列表，按配置顺序尝试，无回落
+				const 规则字符串 = 规则选项.proxyips.join(',');
+				log(`[反代连接][规则] 代理到: ${host}:${portNum} via [${规则字符串}]`);
+				const 所有反代数组 = await 解析地址端口(规则字符串, host, yourUUID, true);
+				newSocket = await connectDirect(atob('UFJPWFlJUC50cDEuMDkwMjI3Lnh5eg=='), 1, 本次首包数据, 所有反代数组, false, 0);
+			} else if (启用SOCKS5反代 === 'socks5') {
 				log(`[SOCKS5代理] 代理到: ${host}:${portNum}`);
 				newSocket = await socks5Connect(host, portNum, 本次首包数据);
 			} else if (启用SOCKS5反代 === 'http') {
@@ -1814,6 +1843,21 @@ async function forwardataTCP(host, portNum, rawData, ws, respHeader, remoteConnW
 			}
 		}
 	}
+	// PROXYIP 规则匹配优先于其他分支：命中后直接走规则中的 PROXYIP，不直连，不回落
+	const 命中PROXYIP规则 = 查找命中PROXYIP规则(host, PROXYIP规则列表);
+	if (命中PROXYIP规则) {
+		log(`[TCP转发] 命中 PROXYIP 规则: host=${host} -> [${命中PROXYIP规则.proxyips.join(',')}]`);
+		remoteConnWrapper.retryConnect = async () => connecttoPry(!已通过代理发送首包, 命中PROXYIP规则);
+		try {
+			await connecttoPry(true, 命中PROXYIP规则);
+		} catch (err) {
+			log(`[TCP转发][规则] PROXYIP 规则连接全部失败，连接终止：host=${host} ips=[${命中PROXYIP规则.proxyips.join(',')}] err=${err.message}`);
+			closeSocketQuietly(ws);
+			throw err;
+		}
+		return;
+	}
+
 	remoteConnWrapper.retryConnect = async () => connecttoPry(!已通过代理发送首包);
 
 	if (启用SOCKS5反代 && (启用SOCKS5全局反代 || SOCKS5白名单.some(p => new RegExp(`^${p.replace(/\*/g, '.*')}$`, 'i').test(host)))) {
@@ -4735,6 +4779,51 @@ async function 整理成数组(内容) {
 	return 地址数组;
 }
 
+// 解析 proxyip-rules.txt 内容为规则数组
+// 格式：[ip1,ip2,...] 头部声明一组 PROXYIP，下面每行一个生效域名（domain-suffix 匹配）
+// # 起始为注释，空行忽略；IP 顺序就是连接尝试顺序
+function 解析PROXYIP规则(文本) {
+	const 规则列表 = [];
+	let 当前规则 = null;
+	for (const 原始行 of (文本 || '').split(/\r?\n/)) {
+		const 行 = 原始行.replace(/#.*$/, '').trim();
+		if (!行) continue;
+		const 头部 = 行.match(/^\[(.+)\]$/);
+		if (头部) {
+			const proxyips = 头部[1].split(',').map(s => s.trim()).filter(Boolean);
+			当前规则 = { proxyips, domains: [] };
+			规则列表.push(当前规则);
+		} else if (当前规则) {
+			当前规则.domains.push(行.toLowerCase());
+		}
+	}
+	return 规则列表.filter(r => r.proxyips.length && r.domains.length);
+}
+
+// host 是否命中某条规则（domain-suffix 语义：命中域名本身和其子域名）
+function 查找命中PROXYIP规则(host, 规则列表) {
+	if (!host || !规则列表 || !规则列表.length) return null;
+	const h = host.toLowerCase();
+	for (const r of 规则列表) {
+		for (const d of r.domains) {
+			if (h === d || h.endsWith('.' + d)) return r;
+		}
+	}
+	return null;
+}
+
+// 从 KV 读取 proxyip-rules.txt 并解析。读不到/出错时返回空数组（即不影响现有流程）
+async function 加载PROXYIP规则(env) {
+	if (!env || !env.KV || typeof env.KV.get !== 'function') return [];
+	try {
+		const 文本 = await env.KV.get('proxyip-rules.txt');
+		return 文本 ? 解析PROXYIP规则(文本) : [];
+	} catch (e) {
+		console.error('加载 PROXYIP 规则失败:', e && e.message);
+		return [];
+	}
+}
+
 async function 获取优选订阅生成器数据(优选订阅生成器HOST) {
 	let 优选IP = [], 其他节点LINK = '', 格式化HOST = 优选订阅生成器HOST.replace(/^sub:\/\//i, 'https://').split('#')[0].split('?')[0];
 	if (!/^https?:\/\//i.test(格式化HOST)) 格式化HOST = `https://${格式化HOST}`;
@@ -5224,8 +5313,8 @@ function sha224(s) {
 	return hex;
 }
 
-async function 解析地址端口(proxyIP, 目标域名 = 'dash.cloudflare.com', UUID = '00000000-0000-4000-8000-000000000000') {
-	if (!缓存反代IP || !缓存反代解析数组 || 缓存反代IP !== proxyIP) {
+async function 解析地址端口(proxyIP, 目标域名 = 'dash.cloudflare.com', UUID = '00000000-0000-4000-8000-000000000000', 保持顺序 = false) {
+	if (保持顺序 || !缓存反代IP || !缓存反代解析数组 || 缓存反代IP !== proxyIP) {
 		proxyIP = proxyIP.toLowerCase();
 
 		function 解析地址端口字符串(str) {
@@ -5299,6 +5388,11 @@ async function 解析地址端口(proxyIP, 目标域名 = 'dash.cloudflare.com',
 				log(`[反代解析] ${地址} 未获取到TXT、A和AAAA记录，保留原域名`);
 				所有反代数组.push([地址, 端口]);
 			}
+		}
+		if (保持顺序) {
+			// 规则模式：完全保留用户书写顺序，不排序/不洗牌/不截断，也不进入全局缓存
+			log(`[反代解析][保持顺序] 解析完成 总数: ${所有反代数组.length}个\n${所有反代数组.map(([ip, port], index) => `${index + 1}. ${ip}:${port}`).join('\n')}`);
+			return 所有反代数组;
 		}
 		const 排序后数组 = 所有反代数组.sort((a, b) => a[0].localeCompare(b[0]));
 		const 目标根域名 = 目标域名.includes('.') ? 目标域名.split('.').slice(-2).join('.') : 目标域名;
